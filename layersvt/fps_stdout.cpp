@@ -61,6 +61,8 @@ template fps_stdout_layer_data *GetLayerDataPtr<fps_stdout_layer_data>(void *dat
 
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(VkPhysicalDevice gpu, const VkDeviceCreateInfo *pCreateInfo,
                                               const VkAllocationCallbacks *pAllocator, VkDevice *pDevice) {
+    fprintf(stdout, "[fps_stdout] vkCreateDevice\n");
+    fflush(stdout);
     VkLayerDeviceCreateInfo *chain_info = get_chain_info(pCreateInfo, VK_LAYER_LINK_INFO);
 
     assert(chain_info->u.pLayerInfo);
@@ -109,6 +111,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(VkPhysicalDevice gpu, const VkDevi
 
 VKAPI_ATTR VkResult VKAPI_CALL vkEnumeratePhysicalDevices(VkInstance instance, uint32_t *pPhysicalDeviceCount,
                                                           VkPhysicalDevice *pPhysicalDevices) {
+    fprintf(stdout, "[fps_stdout] vkEnumeratePhysicalDevices\n");
+    fflush(stdout);
     dispatch_key key = get_dispatch_key(instance);
     fps_stdout_layer_data *my_data = GetLayerDataPtr(key, layer_data_map);
     VkuInstanceDispatchTable *pTable = my_data->instance_dispatch_table;
@@ -128,6 +132,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumeratePhysicalDevices(VkInstance instance, u
 
 VKAPI_ATTR VkResult VKAPI_CALL vkEnumeratePhysicalDeviceGroups(VkInstance instance, uint32_t *pPhysicalDeviceGroupCount,
                                                                VkPhysicalDeviceGroupProperties *pPhysicalDeviceGroupProperties) {
+    fprintf(stdout, "[fps_stdout] vkEnumeratePhysicalDeviceGroups\n");
+    fflush(stdout);
     dispatch_key key = get_dispatch_key(instance);
     fps_stdout_layer_data *my_data = GetLayerDataPtr(key, layer_data_map);
     VkuInstanceDispatchTable *pTable = my_data->instance_dispatch_table;
@@ -148,6 +154,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumeratePhysicalDeviceGroups(VkInstance instan
 }
 
 VKAPI_ATTR void VKAPI_CALL vkDestroyDevice(VkDevice device, const VkAllocationCallbacks *pAllocator) {
+    fprintf(stdout, "[fps_stdout] vkDestroyDevice\n");
+    fflush(stdout);
     dispatch_key key = get_dispatch_key(device);
     fps_stdout_layer_data *my_data = GetLayerDataPtr(key, layer_data_map);
     VkuDeviceDispatchTable *pTable = my_data->device_dispatch_table;
@@ -159,6 +167,8 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyDevice(VkDevice device, const VkAllocationCa
 
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateInstance(const VkInstanceCreateInfo *pCreateInfo, const VkAllocationCallbacks *pAllocator,
                                                 VkInstance *pInstance) {
+    fprintf(stdout, "[fps_stdout] vkCreateInstance\n");
+    fflush(stdout);
 #if defined(_WIN32) && defined(_CRTDBG_MODE_FILE)
 #if !defined(NDEBUG)
     _CrtSetReportMode(_CRT_WARN, _CRTDBG_MODE_FILE);
@@ -194,6 +204,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateInstance(const VkInstanceCreateInfo *pCre
 }
 
 VKAPI_ATTR void VKAPI_CALL vkDestroyInstance(VkInstance instance, const VkAllocationCallbacks *pAllocator) {
+    fprintf(stdout, "[fps_stdout] vkDestroyInstance\n");
+    fflush(stdout);
     dispatch_key key = get_dispatch_key(instance);
     fps_stdout_layer_data *my_data = GetLayerDataPtr(key, layer_data_map);
     VkuInstanceDispatchTable *pTable = my_data->instance_dispatch_table;
@@ -203,6 +215,8 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyInstance(VkInstance instance, const VkAlloca
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR *pPresentInfo) {
+    fprintf(stdout, "[fps_stdout] vkQueuePresentKHR\n");
+    fflush(stdout);
     fps_stdout_layer_data *my_data = GetLayerDataPtr(get_dispatch_key(queue), layer_data_map);
 
     time_t now;
@@ -224,6 +238,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueuePresentKHR(VkQueue queue, const VkPresentI
 
 VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceToolPropertiesEXT(VkPhysicalDevice physicalDevice, uint32_t *pToolCount,
                                                                     VkPhysicalDeviceToolPropertiesEXT *pToolProperties) {
+    fprintf(stdout, "[fps_stdout] vkGetPhysicalDeviceToolPropertiesEXT\n");
+    fflush(stdout);
     static const VkPhysicalDeviceToolPropertiesEXT fps_stdout_layer_tool_props = {
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TOOL_PROPERTIES_EXT,
         nullptr,
@@ -262,6 +278,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceToolPropertiesEXT(VkPhysicalDe
 #endif
 
 EXPORT_FUNCTION VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice dev, const char *funcName) {
+    fprintf(stdout, "[fps_stdout] vkGetDeviceProcAddr\n");
+    fflush(stdout);
 #define ADD_HOOK(fn) \
     if (!strncmp(#fn, funcName, sizeof(#fn))) return (PFN_vkVoidFunction)fn
 
@@ -281,6 +299,8 @@ EXPORT_FUNCTION VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkD
 }
 
 EXPORT_FUNCTION VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instance, const char *funcName) {
+    fprintf(stdout, "[fps_stdout] vkGetInstanceProcAddr\n");
+    fflush(stdout);
 #define ADD_HOOK(fn) \
     if (!strncmp(#fn, funcName, sizeof(#fn))) return (PFN_vkVoidFunction)fn
 
