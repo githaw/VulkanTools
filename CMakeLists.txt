@@ -92,16 +92,19 @@ if (CMAKE_SYSTEM_NAME MATCHES "Windows|Linux|BSD")
     option(BUILD_APIDUMP "Build api_dump layer" ON)
     option(BUILD_MONITOR "Build monitor layer" ON)
     option(BUILD_SCREENSHOT "Build screenshot layer" ON)
+    option(BUILD_FPS_STDOUT "Build fps stdout layer" ON)
     option(BUILD_LAYERMGR "Build Vulkan Configurator" ON)
     set(SDK_VERSION "" CACHE STRING "Vulkan SDK version")
 
 elseif(ANDROID)
 
-    # Currently the Android build only build the API dump and screen shot layer.
+    # Android build supports the API dump, screenshot, and fps stdout layers.
     # - libVkLayer_api_dump.so
     # - libVkLayer_screenshot.so
+    # - libVkLayer_fps_stdout.so
     option(BUILD_APIDUMP "Build api_dump layer" ON)
     option(BUILD_SCREENSHOT "Build screenshot layer" ON)
+    option(BUILD_FPS_STDOUT "Build fps stdout layer" ON)
     set(BUILD_MONITOR OFF)
     set(BUILD_LAYERMGR OFF)
 
@@ -109,6 +112,7 @@ elseif (APPLE)
 
     option(BUILD_APIDUMP "Build api_dump layer" ON)
     option(BUILD_SCREENSHOT "Build screenshot layer" ON)
+    option(BUILD_FPS_STDOUT "Build fps stdout layer" ON)
     set(BUILD_MONITOR OFF)
 
     if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
@@ -121,7 +125,7 @@ if(BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
-if(BUILD_APIDUMP OR BUILD_MONITOR OR BUILD_SCREENSHOT)
+if(BUILD_APIDUMP OR BUILD_MONITOR OR BUILD_SCREENSHOT OR BUILD_FPS_STDOUT)
     message(STATUS "INFO: Building Vulkan Layers")
     add_subdirectory(layersvt)
 endif()

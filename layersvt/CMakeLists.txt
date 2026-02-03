@@ -116,11 +116,23 @@ if(BUILD_SCREENSHOT)
     )
 endif()
 
+if(BUILD_FPS_STDOUT)
+    add_library(VkLayer_fps_stdout MODULE)
+    set_target_properties(VkLayer_fps_stdout PROPERTIES FOLDER "layers/fps_stdout")
+    target_sources(VkLayer_fps_stdout PRIVATE
+        fps_stdout.cpp
+        vk_layer_table.cpp
+        vk_layer_table.h
+        fps_stdout_layer.md
+        json/VkLayer_fps_stdout.json.in
+    )
+endif()
+
 if (BUILD_TESTS AND NOT RUN_ON_GITHUB)
     add_subdirectory(test)
 endif()
 
-list(APPEND TOOL_LAYERS "VkLayer_api_dump" "VkLayer_screenshot" "VkLayer_monitor")
+list(APPEND TOOL_LAYERS "VkLayer_api_dump" "VkLayer_screenshot" "VkLayer_monitor" "VkLayer_fps_stdout")
 foreach(layer ${TOOL_LAYERS})
     if (NOT TARGET "${layer}")
         continue()

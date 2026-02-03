@@ -33,6 +33,9 @@ To specify frames to be captured, the environment variable 'VK_SCREENSHOT_FRAMES
 ### View Frames Per Second
 layersvt/monitor.cpp - utility layer that will display an applications FPS in the title bar of a windowed application.
 
+### Print Frames Per Second to Stdout
+layersvt/fps_stdout.cpp - utility layer that will print an application's FPS to stdout.
+
 ## Using Layers
 
 1. Build VK loader using normal steps (cmake and make)
