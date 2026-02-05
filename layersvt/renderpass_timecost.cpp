@@ -65,6 +65,7 @@ struct renderpass_timecost_layer_data {
     float timestamp_period_ns{};
     std::atomic<uint64_t> submit_counter{1};
     std::unordered_map<VkFence, uint64_t> fence_submit_ids;
+    std::unordered_map<VkQueue, uint64_t> queue_submit_ids;
 
     std::unordered_map<VkCommandBuffer, CommandBufferState> command_buffers;
 };
@@ -116,7 +117,8 @@ static bool ReserveQueryPair(CommandBufferState &state, RenderPassRecord &record
 }
 
 static void DumpRenderPassTimings(renderpass_timecost_layer_data *dev_data, const char *wait_label, uint32_t fence_count,
-                                  const VkFence *fences, VkBool32 wait_all, uint64_t fence_submit_id) {
+                                  const VkFence *fences, VkBool32 wait_all, uint64_t fence_submit_id, VkQueue queue,
+                                  uint64_t queue_submit_id) {
     if (!dev_data || !dev_data->device_dispatch_table) return;
 
     for (auto &entry : dev_data->command_buffers) {
@@ -142,17 +144,20 @@ static void DumpRenderPassTimings(renderpass_timecost_layer_data *dev_data, cons
             double time_ms = (double)(end - start) * (double)dev_data->timestamp_period_ns / 1000000.0;
             if (fences && fence_count > 0) {
                 fprintf(stdout,
-                        "[renderpass_timecost][%s] fence_count=%u wait_all=%u fence0=%p fence_submit_id=%llu submit_id=%llu "
-                        "cmd_buf=%p renderpass=%zu rp=%p subpass=%u pipeline=%p bind_point=%d time_ms=%.3f\n",
+                        "[renderpass_timecost][%s] fence_count=%u wait_all=%u fence0=%p fence_submit_id=%llu queue=%p "
+                        "queue_submit_id=%llu submit_id=%llu cmd_buf=%p renderpass=%zu rp=%p subpass=%u pipeline=%p "
+                        "bind_point=%d time_ms=%.3f\n",
                         wait_label, fence_count, wait_all, (void *)fences[0], (unsigned long long)fence_submit_id,
-                        (unsigned long long)state.last_submit_id, (void *)command_buffer, i, (void *)record.renderpass,
-                        record.subpass, (void *)record.pipeline, (int)record.bind_point, time_ms);
+                        (void *)queue, (unsigned long long)queue_submit_id, (unsigned long long)state.last_submit_id,
+                        (void *)command_buffer, i, (void *)record.renderpass, record.subpass, (void *)record.pipeline,
+                        (int)record.bind_point, time_ms);
             } else {
                 fprintf(stdout,
-                        "[renderpass_timecost][%s] submit_id=%llu cmd_buf=%p renderpass=%zu rp=%p subpass=%u pipeline=%p "
-                        "bind_point=%d time_ms=%.3f\n",
-                        wait_label, (unsigned long long)state.last_submit_id, (void *)command_buffer, i,
-                        (void *)record.renderpass, record.subpass, (void *)record.pipeline, (int)record.bind_point, time_ms);
+                        "[renderpass_timecost][%s] queue=%p queue_submit_id=%llu submit_id=%llu cmd_buf=%p renderpass=%zu rp=%p "
+                        "subpass=%u pipeline=%p bind_point=%d time_ms=%.3f\n",
+                        wait_label, (void *)queue, (unsigned long long)queue_submit_id, (unsigned long long)state.last_submit_id,
+                        (void *)command_buffer, i, (void *)record.renderpass, record.subpass, (void *)record.pipeline,
+                        (int)record.bind_point, time_ms);
             }
         }
         fflush(stdout);
@@ -617,7 +622,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueWaitIdle(VkQueue queue) {
     VkResult result = pTable->QueueWaitIdle(queue);
     if (result != VK_SUCCESS) return result;
 
-    DumpRenderPassTimings(dev_data, "vkQueueWaitIdle", 0, nullptr, VK_FALSE, 0);
+    uint64_t queue_submit_id = 0;
+    auto qit = dev_data->queue_submit_ids.find(queue);
+    if (qit != dev_data->queue_submit_ids.end()) {
+        queue_submit_id = qit->second;
+    }
+    DumpRenderPassTimings(dev_data, "vkQueueWaitIdle", 0, nullptr, VK_FALSE, 0, queue, queue_submit_id);
 
     return result;
 }
@@ -641,6 +651,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(VkQueue queue, uint32_t submitCount
     VkResult result = pTable->QueueSubmit(queue, submitCount, pSubmits, fence);
     if (result == VK_SUCCESS && fence != VK_NULL_HANDLE && submitCount > 0) {
         dev_data->fence_submit_ids[fence] = submit_id_base + submitCount - 1;
+    }
+    if (result == VK_SUCCESS && submitCount > 0) {
+        dev_data->queue_submit_ids[queue] = submit_id_base + submitCount - 1;
     }
     return result;
 }
@@ -670,6 +683,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(VkQueue queue, uint32_t submitCoun
     if (result == VK_SUCCESS && fence != VK_NULL_HANDLE && submitCount > 0) {
         dev_data->fence_submit_ids[fence] = submit_id_base + submitCount - 1;
     }
+    if (result == VK_SUCCESS && submitCount > 0) {
+        dev_data->queue_submit_ids[queue] = submit_id_base + submitCount - 1;
+    }
     return result;
 }
 
@@ -680,7 +696,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkDeviceWaitIdle(VkDevice device) {
     VkResult result = pTable->DeviceWaitIdle(device);
     if (result != VK_SUCCESS) return result;
 
-    DumpRenderPassTimings(dev_data, "vkDeviceWaitIdle", 0, nullptr, VK_FALSE, 0);
+    DumpRenderPassTimings(dev_data, "vkDeviceWaitIdle", 0, nullptr, VK_FALSE, 0, VK_NULL_HANDLE, 0);
 
     return result;
 }
@@ -700,7 +716,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences(VkDevice device, uint32_t fenceCo
             fence_submit_id = it->second;
         }
     }
-    DumpRenderPassTimings(dev_data, "vkWaitForFences", fenceCount, pFences, waitAll, fence_submit_id);
+    DumpRenderPassTimings(dev_data, "vkWaitForFences", fenceCount, pFences, waitAll, fence_submit_id, VK_NULL_HANDLE, 0);
 
     return result;
 }
