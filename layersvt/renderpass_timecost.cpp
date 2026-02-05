@@ -65,6 +65,7 @@ struct renderpass_timecost_layer_data {
     float timestamp_period_ns{};
     std::atomic<uint64_t> submit_counter{1};
     std::unordered_map<VkFence, uint64_t> fence_submit_ids;
+    std::unordered_map<VkFence, VkQueue> fence_queues;
     std::unordered_map<VkQueue, uint64_t> queue_submit_ids;
 
     std::unordered_map<VkCommandBuffer, CommandBufferState> command_buffers;
@@ -651,6 +652,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(VkQueue queue, uint32_t submitCount
     VkResult result = pTable->QueueSubmit(queue, submitCount, pSubmits, fence);
     if (result == VK_SUCCESS && fence != VK_NULL_HANDLE && submitCount > 0) {
         dev_data->fence_submit_ids[fence] = submit_id_base + submitCount - 1;
+        dev_data->fence_queues[fence] = queue;
     }
     if (result == VK_SUCCESS && submitCount > 0) {
         dev_data->queue_submit_ids[queue] = submit_id_base + submitCount - 1;
@@ -682,6 +684,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(VkQueue queue, uint32_t submitCoun
     VkResult result = pTable->QueueSubmit2(queue, submitCount, pSubmits, fence);
     if (result == VK_SUCCESS && fence != VK_NULL_HANDLE && submitCount > 0) {
         dev_data->fence_submit_ids[fence] = submit_id_base + submitCount - 1;
+        dev_data->fence_queues[fence] = queue;
     }
     if (result == VK_SUCCESS && submitCount > 0) {
         dev_data->queue_submit_ids[queue] = submit_id_base + submitCount - 1;
@@ -710,13 +713,24 @@ VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences(VkDevice device, uint32_t fenceCo
     if (result != VK_SUCCESS) return result;
 
     uint64_t fence_submit_id = 0;
+    VkQueue fence_queue = VK_NULL_HANDLE;
+    uint64_t fence_queue_submit_id = 0;
     if (pFences && fenceCount > 0) {
         auto it = dev_data->fence_submit_ids.find(pFences[0]);
         if (it != dev_data->fence_submit_ids.end()) {
             fence_submit_id = it->second;
         }
+        auto qit = dev_data->fence_queues.find(pFences[0]);
+        if (qit != dev_data->fence_queues.end()) {
+            fence_queue = qit->second;
+            auto qsit = dev_data->queue_submit_ids.find(fence_queue);
+            if (qsit != dev_data->queue_submit_ids.end()) {
+                fence_queue_submit_id = qsit->second;
+            }
+        }
     }
-    DumpRenderPassTimings(dev_data, "vkWaitForFences", fenceCount, pFences, waitAll, fence_submit_id, VK_NULL_HANDLE, 0);
+    DumpRenderPassTimings(dev_data, "vkWaitForFences", fenceCount, pFences, waitAll, fence_submit_id, fence_queue,
+                          fence_queue_submit_id);
 
     return result;
 }
@@ -728,6 +742,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkResetFences(VkDevice device, uint32_t fenceCoun
     if (result == VK_SUCCESS && pFences) {
         for (uint32_t i = 0; i < fenceCount; ++i) {
             dev_data->fence_submit_ids.erase(pFences[i]);
+            dev_data->fence_queues.erase(pFences[i]);
         }
     }
     return result;
@@ -738,6 +753,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyFence(VkDevice device, VkFence fence, const 
     VkuDeviceDispatchTable *pTable = dev_data->device_dispatch_table;
     if (fence != VK_NULL_HANDLE) {
         dev_data->fence_submit_ids.erase(fence);
+        dev_data->fence_queues.erase(fence);
     }
     pTable->DestroyFence(device, fence, pAllocator);
 }
