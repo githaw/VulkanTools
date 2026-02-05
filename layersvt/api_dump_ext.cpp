@@ -18,9 +18,11 @@
 #include "vk_layer_table.h"
 #include <assert.h>
 #include <atomic>
+#include <mutex>
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -78,6 +80,21 @@ static inline uint64_t ThreadId() {
 #else
     return (uint64_t)syscall(SYS_gettid);
 #endif
+}
+
+static std::mutex g_thread_index_mutex;
+static std::unordered_map<std::thread::id, uint64_t> g_thread_index_map;
+
+static inline uint64_t ThreadIndex() {
+    std::thread::id this_id = std::this_thread::get_id();
+    std::lock_guard<std::mutex> lg(g_thread_index_mutex);
+    auto it = g_thread_index_map.find(this_id);
+    if (it != g_thread_index_map.end()) {
+        return it->second;
+    }
+    uint64_t index = g_thread_index_map.size();
+    g_thread_index_map.insert({this_id, index});
+    return index;
 }
 
 struct SubpassRecord {
@@ -175,6 +192,7 @@ static void DumpSubpassTimings(api_dump_ext_layer_data *dev_data, const char *wa
 
     const uint64_t cpu_ts_ns = NowNs();
     const uint64_t thread_id = ThreadId();
+    const uint64_t thread_index = ThreadIndex();
 
     for (auto &entry : dev_data->command_buffers) {
         VkCommandBuffer command_buffer = entry.first;
@@ -229,23 +247,23 @@ static void DumpSubpassTimings(api_dump_ext_layer_data *dev_data, const char *wa
             }
             if (fences && fence_count > 0) {
                 fprintf(stdout,
-                        "[api_dump_ext][%s] cpu_ts_ns=%llu thread_id=%llu fence_count=%u wait_all=%u fence0=%p fence_submit_id=%llu "
+                        "[api_dump_ext][%s] cpu_ts_ns=%llu thread_id=%llu thread_index=%llu fence_count=%u wait_all=%u fence0=%p fence_submit_id=%llu "
                         "queue=%p queue_submit_id=%llu frame_id=%llu queue_device=%p queue_instance=%p submit_id=%llu cmd_buf=%p "
                         "cmd_device=%p cmd_instance=%p renderpass=%p subpass=%u time_ms=%.3f\n",
-                        wait_label, (unsigned long long)cpu_ts_ns, (unsigned long long)thread_id, fence_count, wait_all,
-                        (void *)fences[0],
+                        wait_label, (unsigned long long)cpu_ts_ns, (unsigned long long)thread_id,
+                        (unsigned long long)thread_index, fence_count, wait_all, (void *)fences[0],
                         (unsigned long long)fence_submit_id, (void *)queue, (unsigned long long)queue_submit_id,
                         (unsigned long long)frame_id, (void *)queue_device, (void *)queue_instance,
                         (unsigned long long)state.last_submit_id, (void *)command_buffer, (void *)cmd_device,
                         (void *)cmd_instance, (void *)record.renderpass, record.subpass, time_ms);
             } else {
                 fprintf(stdout,
-                        "[api_dump_ext][%s] cpu_ts_ns=%llu thread_id=%llu queue=%p queue_submit_id=%llu frame_id=%llu queue_device=%p "
+                        "[api_dump_ext][%s] cpu_ts_ns=%llu thread_id=%llu thread_index=%llu queue=%p queue_submit_id=%llu frame_id=%llu queue_device=%p "
                         "queue_instance=%p submit_id=%llu cmd_buf=%p cmd_device=%p cmd_instance=%p renderpass=%p subpass=%u "
                         "time_ms=%.3f\n",
-                        wait_label, (unsigned long long)cpu_ts_ns, (unsigned long long)thread_id, (void *)queue,
-                        (unsigned long long)queue_submit_id, (unsigned long long)frame_id, (void *)queue_device,
-                        (void *)queue_instance,
+                        wait_label, (unsigned long long)cpu_ts_ns, (unsigned long long)thread_id,
+                        (unsigned long long)thread_index, (void *)queue, (unsigned long long)queue_submit_id,
+                        (unsigned long long)frame_id, (void *)queue_device, (void *)queue_instance,
                         (unsigned long long)state.last_submit_id, (void *)command_buffer, (void *)cmd_device,
                         (void *)cmd_instance, (void *)record.renderpass, record.subpass, time_ms);
             }
@@ -761,8 +779,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(VkQueue queue, uint32_t submitCount
         dev_data->queue_submit_ids[queue] = submit_id_base + submitCount - 1;
     }
 
-    fprintf(stdout, "[api_dump_ext][vkQueueSubmit] cpu_ts_ns=%llu thread_id=%llu submit_id=%llu queue=%p fence=%p\n",
-            (unsigned long long)cpu_ts_ns, (unsigned long long)ThreadId(),
+    fprintf(stdout, "[api_dump_ext][vkQueueSubmit] cpu_ts_ns=%llu thread_id=%llu thread_index=%llu submit_id=%llu queue=%p fence=%p\n",
+            (unsigned long long)cpu_ts_ns, (unsigned long long)ThreadId(), (unsigned long long)ThreadIndex(),
             (unsigned long long)(submit_id_base + submitCount - 1), (void *)queue, (void *)fence);
     fflush(stdout);
 
@@ -800,8 +818,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(VkQueue queue, uint32_t submitCoun
         dev_data->queue_submit_ids[queue] = submit_id_base + submitCount - 1;
     }
 
-    fprintf(stdout, "[api_dump_ext][vkQueueSubmit2] cpu_ts_ns=%llu thread_id=%llu submit_id=%llu queue=%p fence=%p\n",
-            (unsigned long long)cpu_ts_ns, (unsigned long long)ThreadId(),
+    fprintf(stdout, "[api_dump_ext][vkQueueSubmit2] cpu_ts_ns=%llu thread_id=%llu thread_index=%llu submit_id=%llu queue=%p fence=%p\n",
+            (unsigned long long)cpu_ts_ns, (unsigned long long)ThreadId(), (unsigned long long)ThreadIndex(),
             (unsigned long long)(submit_id_base + submitCount - 1), (void *)queue, (void *)fence);
     fflush(stdout);
 
@@ -817,8 +835,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueuePresentKHR(VkQueue queue, const VkPresentI
 
     uint64_t frame_id = ++dev_data->queue_frame_ids[queue];
     const uint64_t cpu_ts_ns = NowNs();
-    fprintf(stdout, "[api_dump_ext][vkQueuePresentKHR] cpu_ts_ns=%llu thread_id=%llu frame_id=%llu queue=%p swapchain_count=%u\n",
-            (unsigned long long)cpu_ts_ns, (unsigned long long)ThreadId(), (unsigned long long)frame_id, (void *)queue,
+    fprintf(stdout, "[api_dump_ext][vkQueuePresentKHR] cpu_ts_ns=%llu thread_id=%llu thread_index=%llu frame_id=%llu queue=%p swapchain_count=%u\n",
+            (unsigned long long)cpu_ts_ns, (unsigned long long)ThreadId(), (unsigned long long)ThreadIndex(),
+            (unsigned long long)frame_id, (void *)queue,
             pPresentInfo ? pPresentInfo->swapchainCount : 0);
     fflush(stdout);
 
