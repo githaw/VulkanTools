@@ -146,22 +146,45 @@ static void DumpRenderPassTimings(renderpass_timecost_layer_data *dev_data, cons
             uint64_t start = state.time_stamps[record.start_query];
             uint64_t end = state.time_stamps[record.end_query];
             double time_ms = (double)(end - start) * (double)dev_data->timestamp_period_ns / 1000000.0;
+            VkDevice cmd_device = VK_NULL_HANDLE;
+            VkInstance cmd_instance = VK_NULL_HANDLE;
+            auto cdit = dev_data->command_buffer_devices.find(command_buffer);
+            if (cdit != dev_data->command_buffer_devices.end()) {
+                cmd_device = cdit->second;
+                auto diit = dev_data->device_instances.find(cmd_device);
+                if (diit != dev_data->device_instances.end()) {
+                    cmd_instance = diit->second;
+                }
+            }
+            VkDevice queue_device = VK_NULL_HANDLE;
+            VkInstance queue_instance = VK_NULL_HANDLE;
+            if (queue != VK_NULL_HANDLE) {
+                auto qdit = dev_data->queue_devices.find(queue);
+                if (qdit != dev_data->queue_devices.end()) {
+                    queue_device = qdit->second;
+                    auto qdiit = dev_data->device_instances.find(queue_device);
+                    if (qdiit != dev_data->device_instances.end()) {
+                        queue_instance = qdiit->second;
+                    }
+                }
+            }
             if (fences && fence_count > 0) {
                 fprintf(stdout,
                         "[renderpass_timecost][%s] fence_count=%u wait_all=%u fence0=%p fence_submit_id=%llu queue=%p "
-                        "queue_submit_id=%llu submit_id=%llu cmd_buf=%p renderpass=%zu rp=%p subpass=%u pipeline=%p "
-                        "bind_point=%d time_ms=%.3f\n",
+                        "queue_submit_id=%llu queue_device=%p queue_instance=%p submit_id=%llu cmd_buf=%p cmd_device=%p "
+                        "cmd_instance=%p renderpass=%zu rp=%p subpass=%u pipeline=%p bind_point=%d time_ms=%.3f\n",
                         wait_label, fence_count, wait_all, (void *)fences[0], (unsigned long long)fence_submit_id,
-                        (void *)queue, (unsigned long long)queue_submit_id, (unsigned long long)state.last_submit_id,
-                        (void *)command_buffer, i, (void *)record.renderpass, record.subpass, (void *)record.pipeline,
-                        (int)record.bind_point, time_ms);
+                        (void *)queue, (unsigned long long)queue_submit_id, (void *)queue_device, (void *)queue_instance,
+                        (unsigned long long)state.last_submit_id, (void *)command_buffer, (void *)cmd_device, (void *)cmd_instance,
+                        i, (void *)record.renderpass, record.subpass, (void *)record.pipeline, (int)record.bind_point, time_ms);
             } else {
                 fprintf(stdout,
-                        "[renderpass_timecost][%s] queue=%p queue_submit_id=%llu submit_id=%llu cmd_buf=%p renderpass=%zu rp=%p "
-                        "subpass=%u pipeline=%p bind_point=%d time_ms=%.3f\n",
-                        wait_label, (void *)queue, (unsigned long long)queue_submit_id, (unsigned long long)state.last_submit_id,
-                        (void *)command_buffer, i, (void *)record.renderpass, record.subpass, (void *)record.pipeline,
-                        (int)record.bind_point, time_ms);
+                        "[renderpass_timecost][%s] queue=%p queue_submit_id=%llu queue_device=%p queue_instance=%p submit_id=%llu "
+                        "cmd_buf=%p cmd_device=%p cmd_instance=%p renderpass=%zu rp=%p subpass=%u pipeline=%p bind_point=%d "
+                        "time_ms=%.3f\n",
+                        wait_label, (void *)queue, (unsigned long long)queue_submit_id, (void *)queue_device, (void *)queue_instance,
+                        (unsigned long long)state.last_submit_id, (void *)command_buffer, (void *)cmd_device, (void *)cmd_instance,
+                        i, (void *)record.renderpass, record.subpass, (void *)record.pipeline, (int)record.bind_point, time_ms);
             }
         }
         fflush(stdout);
