@@ -102,6 +102,37 @@ static bool ReserveQueryPair(CommandBufferState &state, RenderPassRecord &record
     return true;
 }
 
+static void DumpRenderPassTimings(renderpass_timecost_layer_data *dev_data, const char *wait_label) {
+    if (!dev_data || !dev_data->device_dispatch_table) return;
+
+    for (auto &entry : dev_data->command_buffers) {
+        VkCommandBuffer command_buffer = entry.first;
+        CommandBufferState &state = entry.second;
+        if (state.query_pool == VK_NULL_HANDLE) continue;
+        if (state.renderpasses.empty() || state.next_query == 0) continue;
+
+        if (state.time_stamps.size() < state.next_query) {
+            state.time_stamps.resize(state.next_query);
+        }
+        VkResult query_res =
+            dev_data->device_dispatch_table->GetQueryPoolResults(dev_data->device, state.query_pool, 0, state.next_query,
+                                                                 state.time_stamps.size() * sizeof(uint64_t),
+                                                                 state.time_stamps.data(), sizeof(uint64_t),
+                                                                 VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+        if (query_res != VK_SUCCESS) continue;
+
+        for (size_t i = 0; i < state.renderpasses.size(); ++i) {
+            const RenderPassRecord &record = state.renderpasses[i];
+            uint64_t start = state.time_stamps[record.start_query];
+            uint64_t end = state.time_stamps[record.end_query];
+            double time_ms = (double)(end - start) * (double)dev_data->timestamp_period_ns / 1000000.0;
+            fprintf(stdout, "[renderpass_timecost][%s] cmd_buf=%p renderpass=%zu time_ms=%.3f\n", wait_label,
+                    (void *)command_buffer, i, time_ms);
+        }
+        fflush(stdout);
+    }
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(VkPhysicalDevice gpu, const VkDeviceCreateInfo *pCreateInfo,
                                               const VkAllocationCallbacks *pAllocator, VkDevice *pDevice) {
     fprintf(stdout, "[renderpass_timecost] vkCreateDevice\n");
@@ -470,31 +501,32 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueWaitIdle(VkQueue queue) {
     VkResult result = pTable->QueueWaitIdle(queue);
     if (result != VK_SUCCESS) return result;
 
-    for (auto &entry : dev_data->command_buffers) {
-        VkCommandBuffer command_buffer = entry.first;
-        CommandBufferState &state = entry.second;
-        if (state.query_pool == VK_NULL_HANDLE) continue;
-        if (state.renderpasses.empty() || state.next_query == 0) continue;
+    DumpRenderPassTimings(dev_data, "vkQueueWaitIdle");
 
-        if (state.time_stamps.size() < state.next_query) {
-            state.time_stamps.resize(state.next_query);
-        }
-        VkResult query_res =
-            pTable->GetQueryPoolResults(dev_data->device, state.query_pool, 0, state.next_query,
-                                        state.time_stamps.size() * sizeof(uint64_t), state.time_stamps.data(), sizeof(uint64_t),
-                                        VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
-        if (query_res != VK_SUCCESS) continue;
+    return result;
+}
 
-        for (size_t i = 0; i < state.renderpasses.size(); ++i) {
-            const RenderPassRecord &record = state.renderpasses[i];
-            uint64_t start = state.time_stamps[record.start_query];
-            uint64_t end = state.time_stamps[record.end_query];
-            double time_ms = (double)(end - start) * (double)dev_data->timestamp_period_ns / 1000000.0;
-            fprintf(stdout, "[renderpass_timecost] cmd_buf=%p renderpass=%zu time_ms=%.3f\n", (void *)command_buffer, i,
-                    time_ms);
-        }
-        fflush(stdout);
-    }
+VKAPI_ATTR VkResult VKAPI_CALL vkDeviceWaitIdle(VkDevice device) {
+    renderpass_timecost_layer_data *dev_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
+    VkuDeviceDispatchTable *pTable = dev_data->device_dispatch_table;
+
+    VkResult result = pTable->DeviceWaitIdle(device);
+    if (result != VK_SUCCESS) return result;
+
+    DumpRenderPassTimings(dev_data, "vkDeviceWaitIdle");
+
+    return result;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences(VkDevice device, uint32_t fenceCount, const VkFence *pFences, VkBool32 waitAll,
+                                               uint64_t timeout) {
+    renderpass_timecost_layer_data *dev_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
+    VkuDeviceDispatchTable *pTable = dev_data->device_dispatch_table;
+
+    VkResult result = pTable->WaitForFences(device, fenceCount, pFences, waitAll, timeout);
+    if (result != VK_SUCCESS) return result;
+
+    DumpRenderPassTimings(dev_data, "vkWaitForFences");
 
     return result;
 }
@@ -548,6 +580,8 @@ EXPORT_FUNCTION VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkD
     ADD_HOOK(vkGetDeviceProcAddr);
     ADD_HOOK(vkDestroyDevice);
     ADD_HOOK(vkQueueWaitIdle);
+    ADD_HOOK(vkDeviceWaitIdle);
+    ADD_HOOK(vkWaitForFences);
     ADD_HOOK(vkAllocateCommandBuffers);
     ADD_HOOK(vkFreeCommandBuffers);
     ADD_HOOK(vkBeginCommandBuffer);
