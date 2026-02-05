@@ -67,6 +67,9 @@ struct renderpass_timecost_layer_data {
     std::unordered_map<VkFence, uint64_t> fence_submit_ids;
     std::unordered_map<VkFence, VkQueue> fence_queues;
     std::unordered_map<VkQueue, uint64_t> queue_submit_ids;
+    std::unordered_map<VkQueue, VkDevice> queue_devices;
+    std::unordered_map<VkCommandBuffer, VkDevice> command_buffer_devices;
+    std::unordered_map<VkDevice, VkInstance> device_instances;
 
     std::unordered_map<VkCommandBuffer, CommandBufferState> command_buffers;
 };
@@ -209,6 +212,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(VkPhysicalDevice gpu, const VkDevi
     VkPhysicalDeviceProperties props = {};
     instance_data->instance_dispatch_table->GetPhysicalDeviceProperties(gpu, &props);
     my_device_data->timestamp_period_ns = props.limits.timestampPeriod;
+    my_device_data->device_instances[*pDevice] = instance;
 
     return result;
 }
@@ -338,6 +342,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateCommandBuffers(VkDevice device, const V
             dev_data->pfn_dev_init(device, (void *)pCommandBuffers[i]);
         }
     }
+    for (uint32_t i = 0; i < pAllocateInfo->commandBufferCount; ++i) {
+        dev_data->command_buffer_devices[pCommandBuffers[i]] = device;
+    }
     return result;
 }
 
@@ -354,6 +361,7 @@ VKAPI_ATTR void VKAPI_CALL vkFreeCommandBuffers(VkDevice device, VkCommandPool c
             }
             dev_data->command_buffers.erase(it);
         }
+        dev_data->command_buffer_devices.erase(pCommandBuffers[i]);
     }
 
     pTable->FreeCommandBuffers(device, commandPool, commandBufferCount, pCommandBuffers);
@@ -692,6 +700,26 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(VkQueue queue, uint32_t submitCoun
     return result;
 }
 
+VKAPI_ATTR void VKAPI_CALL vkGetDeviceQueue(VkDevice device, uint32_t queueFamilyIndex, uint32_t queueIndex, VkQueue *pQueue) {
+    renderpass_timecost_layer_data *dev_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
+    VkuDeviceDispatchTable *pTable = dev_data->device_dispatch_table;
+
+    pTable->GetDeviceQueue(device, queueFamilyIndex, queueIndex, pQueue);
+    if (pQueue) {
+        dev_data->queue_devices[*pQueue] = device;
+    }
+}
+
+VKAPI_ATTR void VKAPI_CALL vkGetDeviceQueue2(VkDevice device, const VkDeviceQueueInfo2 *pQueueInfo, VkQueue *pQueue) {
+    renderpass_timecost_layer_data *dev_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
+    VkuDeviceDispatchTable *pTable = dev_data->device_dispatch_table;
+
+    pTable->GetDeviceQueue2(device, pQueueInfo, pQueue);
+    if (pQueue) {
+        dev_data->queue_devices[*pQueue] = device;
+    }
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkDeviceWaitIdle(VkDevice device) {
     renderpass_timecost_layer_data *dev_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     VkuDeviceDispatchTable *pTable = dev_data->device_dispatch_table;
@@ -808,6 +836,8 @@ EXPORT_FUNCTION VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkD
     ADD_HOOK(vkDestroyDevice);
     ADD_HOOK(vkQueueSubmit);
     ADD_HOOK(vkQueueSubmit2);
+    ADD_HOOK(vkGetDeviceQueue);
+    ADD_HOOK(vkGetDeviceQueue2);
     ADD_HOOK(vkQueueWaitIdle);
     ADD_HOOK(vkDeviceWaitIdle);
     ADD_HOOK(vkWaitForFences);
