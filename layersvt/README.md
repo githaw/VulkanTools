@@ -36,6 +36,9 @@ layersvt/monitor.cpp - utility layer that will display an applications FPS in th
 ### Print Frames Per Second to Stdout
 layersvt/fps_stdout.cpp - utility layer that will print an application's FPS to stdout.
 
+### Print RenderPass Timecost to Stdout
+layersvt/renderpass_timecost.cpp - utility layer that will print per-renderpass time cost to stdout.
+
 ## Using Layers
 
 1. Build VK loader using normal steps (cmake and make)
