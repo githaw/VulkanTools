@@ -26,6 +26,9 @@ Note that some layers are code-generated and will therefore exist in the directo
 ### Print API Calls and Parameter Values
 (build dir)/layers/api_dump.cpp (name=VK_LAYER_LUNARG_api_dump) - print out API calls along with parameter values
 
+### Print API Calls with Subpass Timing
+layersvt/api_dump_ext.cpp (name=VK_LAYER_LUNARG_api_dump_ext) - utility layer that prints subpass timing and submit tracing to stdout.
+
 ### Capture Screenshots
 layersvt/screenshot.cpp (name='VK_LAYER_LUNARG_screenshot') - utility layer used to capture and save screenshots of running applications. 
 To specify frames to be captured, the environment variable 'VK_SCREENSHOT_FRAMES' can be set to a comma-separated list of frame numbers (ex: 4,8,15,16,23,42).

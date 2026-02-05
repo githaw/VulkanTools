@@ -90,6 +90,18 @@ if(BUILD_APIDUMP)
     endif()
 endif ()
 
+if(BUILD_API_DUMP_EXT)
+    add_library(VkLayer_api_dump_ext MODULE)
+    set_target_properties(VkLayer_api_dump_ext PROPERTIES FOLDER "layers/api_dump_ext")
+    target_sources(VkLayer_api_dump_ext PRIVATE
+        api_dump_ext.cpp
+        vk_layer_table.cpp
+        vk_layer_table.h
+        api_dump_ext_layer.md
+        json/VkLayer_api_dump_ext.json.in
+    )
+endif ()
+
 if(BUILD_MONITOR)
     add_library(VkLayer_monitor MODULE)
     set_target_properties(VkLayer_monitor PROPERTIES FOLDER "layers/monitor")
@@ -144,8 +156,8 @@ if (BUILD_TESTS AND NOT RUN_ON_GITHUB)
     add_subdirectory(test)
 endif()
 
-list(APPEND TOOL_LAYERS "VkLayer_api_dump" "VkLayer_screenshot" "VkLayer_monitor" "VkLayer_fps_stdout"
-    "VkLayer_renderpass_timecost")
+list(APPEND TOOL_LAYERS "VkLayer_api_dump" "VkLayer_api_dump_ext" "VkLayer_screenshot" "VkLayer_monitor"
+    "VkLayer_fps_stdout" "VkLayer_renderpass_timecost")
 foreach(layer ${TOOL_LAYERS})
     if (NOT TARGET "${layer}")
         continue()

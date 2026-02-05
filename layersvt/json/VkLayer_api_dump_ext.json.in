@@ -1,0 +1,23 @@
+{
+    "file_format_version": "1.0.0",
+    "layer": {
+        "name": "VK_LAYER_LUNARG_api_dump_ext",
+        "type": "GLOBAL",
+        "library_path": "@JSON_LIBRARY_PATH@",
+        "api_version": "@JSON_VERSION@",
+        "implementation_version": "1",
+        "description": "API Dump Extension Layer",
+        "introduction": "The api_dump_ext utility layer prints subpass timing and submit tracing to stdout.",
+        "url": "https://vulkan.lunarg.com/doc/sdk/latest/windows/layer_configuration.html",
+        "platforms": [ "WINDOWS", "LINUX", "MACOS", "ANDROID" ],
+        "device_extensions": [
+            {
+                "name": "VK_EXT_tooling_info",
+                "spec_version": "1",
+                "entrypoints": [
+                    "vkGetPhysicalDeviceToolPropertiesEXT"
+                ]
+            }
+        ]
+    }
+}

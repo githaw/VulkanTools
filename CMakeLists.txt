@@ -90,6 +90,7 @@ endif()
 if (CMAKE_SYSTEM_NAME MATCHES "Windows|Linux|BSD")
 
     option(BUILD_APIDUMP "Build api_dump layer" ON)
+    option(BUILD_API_DUMP_EXT "Build api_dump extension layer" ON)
     option(BUILD_MONITOR "Build monitor layer" ON)
     option(BUILD_SCREENSHOT "Build screenshot layer" ON)
     option(BUILD_FPS_STDOUT "Build fps stdout layer" ON)
@@ -104,6 +105,7 @@ elseif(ANDROID)
     # - libVkLayer_screenshot.so
     # - libVkLayer_fps_stdout.so
     option(BUILD_APIDUMP "Build api_dump layer" ON)
+    option(BUILD_API_DUMP_EXT "Build api_dump extension layer" ON)
     option(BUILD_SCREENSHOT "Build screenshot layer" ON)
     option(BUILD_FPS_STDOUT "Build fps stdout layer" ON)
     option(BUILD_RENDERPASS_TIMECOST "Build renderpass timecost layer" ON)
@@ -113,6 +115,7 @@ elseif(ANDROID)
 elseif (APPLE)
 
     option(BUILD_APIDUMP "Build api_dump layer" ON)
+    option(BUILD_API_DUMP_EXT "Build api_dump extension layer" ON)
     option(BUILD_SCREENSHOT "Build screenshot layer" ON)
     option(BUILD_FPS_STDOUT "Build fps stdout layer" ON)
     option(BUILD_RENDERPASS_TIMECOST "Build renderpass timecost layer" ON)
