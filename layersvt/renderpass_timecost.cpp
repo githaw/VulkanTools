@@ -102,7 +102,8 @@ static bool ReserveQueryPair(CommandBufferState &state, RenderPassRecord &record
     return true;
 }
 
-static void DumpRenderPassTimings(renderpass_timecost_layer_data *dev_data, const char *wait_label) {
+static void DumpRenderPassTimings(renderpass_timecost_layer_data *dev_data, const char *wait_label, uint32_t fence_count,
+                                  const VkFence *fences, VkBool32 wait_all) {
     if (!dev_data || !dev_data->device_dispatch_table) return;
 
     for (auto &entry : dev_data->command_buffers) {
@@ -126,8 +127,14 @@ static void DumpRenderPassTimings(renderpass_timecost_layer_data *dev_data, cons
             uint64_t start = state.time_stamps[record.start_query];
             uint64_t end = state.time_stamps[record.end_query];
             double time_ms = (double)(end - start) * (double)dev_data->timestamp_period_ns / 1000000.0;
-            fprintf(stdout, "[renderpass_timecost][%s] cmd_buf=%p renderpass=%zu time_ms=%.3f\n", wait_label,
-                    (void *)command_buffer, i, time_ms);
+            if (fences && fence_count > 0) {
+                fprintf(stdout,
+                        "[renderpass_timecost][%s] fence_count=%u wait_all=%u fence0=%p cmd_buf=%p renderpass=%zu time_ms=%.3f\n",
+                        wait_label, fence_count, wait_all, (void *)fences[0], (void *)command_buffer, i, time_ms);
+            } else {
+                fprintf(stdout, "[renderpass_timecost][%s] cmd_buf=%p renderpass=%zu time_ms=%.3f\n", wait_label,
+                        (void *)command_buffer, i, time_ms);
+            }
         }
         fflush(stdout);
     }
@@ -501,7 +508,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueWaitIdle(VkQueue queue) {
     VkResult result = pTable->QueueWaitIdle(queue);
     if (result != VK_SUCCESS) return result;
 
-    DumpRenderPassTimings(dev_data, "vkQueueWaitIdle");
+    DumpRenderPassTimings(dev_data, "vkQueueWaitIdle", 0, nullptr, VK_FALSE);
 
     return result;
 }
@@ -513,7 +520,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkDeviceWaitIdle(VkDevice device) {
     VkResult result = pTable->DeviceWaitIdle(device);
     if (result != VK_SUCCESS) return result;
 
-    DumpRenderPassTimings(dev_data, "vkDeviceWaitIdle");
+    DumpRenderPassTimings(dev_data, "vkDeviceWaitIdle", 0, nullptr, VK_FALSE);
 
     return result;
 }
@@ -526,7 +533,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences(VkDevice device, uint32_t fenceCo
     VkResult result = pTable->WaitForFences(device, fenceCount, pFences, waitAll, timeout);
     if (result != VK_SUCCESS) return result;
 
-    DumpRenderPassTimings(dev_data, "vkWaitForFences");
+    DumpRenderPassTimings(dev_data, "vkWaitForFences", fenceCount, pFences, waitAll);
 
     return result;
 }
