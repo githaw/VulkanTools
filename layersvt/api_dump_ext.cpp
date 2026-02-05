@@ -28,9 +28,14 @@
 
 #if defined(_WIN32)
 #include <windows.h>
+#include <processthreadsapi.h>
 #elif defined(__APPLE__)
 #include <mach/mach_time.h>
+#include <pthread.h>
+#include <sys/syscall.h>
 #else
+#include <pthread.h>
+#include <sys/syscall.h>
 #include <time.h>
 #endif
 
@@ -60,6 +65,18 @@ static inline uint64_t NowNs() {
     struct timespec ts {};
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return uint64_t(ts.tv_sec) * 1000000000ull + ts.tv_nsec;
+#endif
+}
+
+static inline uint64_t ThreadId() {
+#if defined(_WIN32)
+    return (uint64_t)GetCurrentThreadId();
+#elif defined(__APPLE__)
+    uint64_t tid = 0;
+    pthread_threadid_np(nullptr, &tid);
+    return tid;
+#else
+    return (uint64_t)syscall(SYS_gettid);
 #endif
 }
 
@@ -97,6 +114,7 @@ struct api_dump_ext_layer_data {
     std::unordered_map<VkFence, uint64_t> fence_submit_ids;
     std::unordered_map<VkFence, VkQueue> fence_queues;
     std::unordered_map<VkQueue, uint64_t> queue_submit_ids;
+    std::unordered_map<VkQueue, uint64_t> queue_frame_ids;
     std::unordered_map<VkQueue, VkDevice> queue_devices;
     std::unordered_map<VkCommandBuffer, VkDevice> command_buffer_devices;
     std::unordered_map<VkDevice, VkInstance> device_instances;
@@ -156,6 +174,7 @@ static void DumpSubpassTimings(api_dump_ext_layer_data *dev_data, const char *wa
     if (!dev_data || !dev_data->device_dispatch_table) return;
 
     const uint64_t cpu_ts_ns = NowNs();
+    const uint64_t thread_id = ThreadId();
 
     for (auto &entry : dev_data->command_buffers) {
         VkCommandBuffer command_buffer = entry.first;
@@ -201,24 +220,34 @@ static void DumpSubpassTimings(api_dump_ext_layer_data *dev_data, const char *wa
             uint64_t start = state.time_stamps[record.start_query];
             uint64_t end = state.time_stamps[record.end_query];
             double time_ms = (double)(end - start) * (double)dev_data->timestamp_period_ns / 1000000.0;
+            uint64_t frame_id = 0;
+            if (queue != VK_NULL_HANDLE) {
+                auto fit = dev_data->queue_frame_ids.find(queue);
+                if (fit != dev_data->queue_frame_ids.end()) {
+                    frame_id = fit->second;
+                }
+            }
             if (fences && fence_count > 0) {
                 fprintf(stdout,
-                        "[api_dump_ext][%s] cpu_ts_ns=%llu fence_count=%u wait_all=%u fence0=%p fence_submit_id=%llu "
-                        "queue=%p queue_submit_id=%llu queue_device=%p queue_instance=%p submit_id=%llu cmd_buf=%p "
+                        "[api_dump_ext][%s] cpu_ts_ns=%llu thread_id=%llu fence_count=%u wait_all=%u fence0=%p fence_submit_id=%llu "
+                        "queue=%p queue_submit_id=%llu frame_id=%llu queue_device=%p queue_instance=%p submit_id=%llu cmd_buf=%p "
                         "cmd_device=%p cmd_instance=%p renderpass=%p subpass=%u time_ms=%.3f\n",
-                        wait_label, (unsigned long long)cpu_ts_ns, fence_count, wait_all, (void *)fences[0],
+                        wait_label, (unsigned long long)cpu_ts_ns, (unsigned long long)thread_id, fence_count, wait_all,
+                        (void *)fences[0],
                         (unsigned long long)fence_submit_id, (void *)queue, (unsigned long long)queue_submit_id,
-                        (void *)queue_device, (void *)queue_instance, (unsigned long long)state.last_submit_id,
-                        (void *)command_buffer, (void *)cmd_device, (void *)cmd_instance, (void *)record.renderpass,
-                        record.subpass, time_ms);
+                        (unsigned long long)frame_id, (void *)queue_device, (void *)queue_instance,
+                        (unsigned long long)state.last_submit_id, (void *)command_buffer, (void *)cmd_device,
+                        (void *)cmd_instance, (void *)record.renderpass, record.subpass, time_ms);
             } else {
                 fprintf(stdout,
-                        "[api_dump_ext][%s] cpu_ts_ns=%llu queue=%p queue_submit_id=%llu queue_device=%p queue_instance=%p "
-                        "submit_id=%llu cmd_buf=%p cmd_device=%p cmd_instance=%p renderpass=%p subpass=%u time_ms=%.3f\n",
-                        wait_label, (unsigned long long)cpu_ts_ns, (void *)queue, (unsigned long long)queue_submit_id,
-                        (void *)queue_device, (void *)queue_instance, (unsigned long long)state.last_submit_id,
-                        (void *)command_buffer, (void *)cmd_device, (void *)cmd_instance, (void *)record.renderpass,
-                        record.subpass, time_ms);
+                        "[api_dump_ext][%s] cpu_ts_ns=%llu thread_id=%llu queue=%p queue_submit_id=%llu frame_id=%llu queue_device=%p "
+                        "queue_instance=%p submit_id=%llu cmd_buf=%p cmd_device=%p cmd_instance=%p renderpass=%p subpass=%u "
+                        "time_ms=%.3f\n",
+                        wait_label, (unsigned long long)cpu_ts_ns, (unsigned long long)thread_id, (void *)queue,
+                        (unsigned long long)queue_submit_id, (unsigned long long)frame_id, (void *)queue_device,
+                        (void *)queue_instance,
+                        (unsigned long long)state.last_submit_id, (void *)command_buffer, (void *)cmd_device,
+                        (void *)cmd_instance, (void *)record.renderpass, record.subpass, time_ms);
             }
         }
         fflush(stdout);
@@ -326,6 +355,7 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyDevice(VkDevice device, const VkAllocationCa
     my_data->command_buffer_devices.clear();
     my_data->queue_devices.clear();
     my_data->queue_submit_ids.clear();
+    my_data->queue_frame_ids.clear();
     my_data->fence_submit_ids.clear();
     my_data->fence_queues.clear();
     my_data->device_instances.erase(device);
@@ -731,8 +761,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(VkQueue queue, uint32_t submitCount
         dev_data->queue_submit_ids[queue] = submit_id_base + submitCount - 1;
     }
 
-    fprintf(stdout, "[api_dump_ext][vkQueueSubmit] cpu_ts_ns=%llu submit_id=%llu queue=%p fence=%p\n",
-            (unsigned long long)cpu_ts_ns, (unsigned long long)(submit_id_base + submitCount - 1), (void *)queue, (void *)fence);
+    fprintf(stdout, "[api_dump_ext][vkQueueSubmit] cpu_ts_ns=%llu thread_id=%llu submit_id=%llu queue=%p fence=%p\n",
+            (unsigned long long)cpu_ts_ns, (unsigned long long)ThreadId(),
+            (unsigned long long)(submit_id_base + submitCount - 1), (void *)queue, (void *)fence);
     fflush(stdout);
 
     return result;
@@ -769,8 +800,26 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(VkQueue queue, uint32_t submitCoun
         dev_data->queue_submit_ids[queue] = submit_id_base + submitCount - 1;
     }
 
-    fprintf(stdout, "[api_dump_ext][vkQueueSubmit2] cpu_ts_ns=%llu submit_id=%llu queue=%p fence=%p\n",
-            (unsigned long long)cpu_ts_ns, (unsigned long long)(submit_id_base + submitCount - 1), (void *)queue, (void *)fence);
+    fprintf(stdout, "[api_dump_ext][vkQueueSubmit2] cpu_ts_ns=%llu thread_id=%llu submit_id=%llu queue=%p fence=%p\n",
+            (unsigned long long)cpu_ts_ns, (unsigned long long)ThreadId(),
+            (unsigned long long)(submit_id_base + submitCount - 1), (void *)queue, (void *)fence);
+    fflush(stdout);
+
+    return result;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR *pPresentInfo) {
+    api_dump_ext_layer_data *dev_data = GetLayerDataPtr(get_dispatch_key(queue), layer_data_map);
+    VkuDeviceDispatchTable *pTable = dev_data->device_dispatch_table;
+
+    VkResult result = pTable->QueuePresentKHR(queue, pPresentInfo);
+    if (result != VK_SUCCESS) return result;
+
+    uint64_t frame_id = ++dev_data->queue_frame_ids[queue];
+    const uint64_t cpu_ts_ns = NowNs();
+    fprintf(stdout, "[api_dump_ext][vkQueuePresentKHR] cpu_ts_ns=%llu thread_id=%llu frame_id=%llu queue=%p swapchain_count=%u\n",
+            (unsigned long long)cpu_ts_ns, (unsigned long long)ThreadId(), (unsigned long long)frame_id, (void *)queue,
+            pPresentInfo ? pPresentInfo->swapchainCount : 0);
     fflush(stdout);
 
     return result;
@@ -909,6 +958,7 @@ EXPORT_FUNCTION VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkD
     ADD_HOOK(vkDestroyDevice);
     ADD_HOOK(vkQueueSubmit);
     ADD_HOOK(vkQueueSubmit2);
+    ADD_HOOK(vkQueuePresentKHR);
     ADD_HOOK(vkGetDeviceQueue);
     ADD_HOOK(vkGetDeviceQueue2);
     ADD_HOOK(vkQueueWaitIdle);
