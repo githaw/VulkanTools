@@ -34,6 +34,10 @@ static constexpr uint32_t kMaxQueriesPerCmdBuffer = 1024;
 struct RenderPassRecord {
     uint32_t start_query = 0;
     uint32_t end_query = 0;
+    VkRenderPass renderpass = VK_NULL_HANDLE;
+    uint32_t subpass = 0;
+    VkPipeline pipeline = VK_NULL_HANDLE;
+    VkPipelineBindPoint bind_point = VK_PIPELINE_BIND_POINT_GRAPHICS;
 };
 
 struct CommandBufferState {
@@ -42,6 +46,8 @@ struct CommandBufferState {
     uint32_t next_query = 0;
     bool warned_overflow = false;
     int32_t active_renderpass = -1;
+    VkRenderPass current_renderpass = VK_NULL_HANDLE;
+    uint32_t current_subpass = 0;
     std::vector<RenderPassRecord> renderpasses;
     std::vector<uint64_t> time_stamps;
 };
@@ -85,6 +91,8 @@ static void InitCommandBufferState(renderpass_timecost_layer_data *dev_data, VkC
     state.renderpasses.clear();
     state.warned_overflow = false;
     state.active_renderpass = -1;
+    state.current_renderpass = VK_NULL_HANDLE;
+    state.current_subpass = 0;
     state.time_stamps.clear();
     if (state.max_queries > 0) {
         state.time_stamps.reserve(state.max_queries);
@@ -129,11 +137,16 @@ static void DumpRenderPassTimings(renderpass_timecost_layer_data *dev_data, cons
             double time_ms = (double)(end - start) * (double)dev_data->timestamp_period_ns / 1000000.0;
             if (fences && fence_count > 0) {
                 fprintf(stdout,
-                        "[renderpass_timecost][%s] fence_count=%u wait_all=%u fence0=%p cmd_buf=%p renderpass=%zu time_ms=%.3f\n",
-                        wait_label, fence_count, wait_all, (void *)fences[0], (void *)command_buffer, i, time_ms);
+                        "[renderpass_timecost][%s] fence_count=%u wait_all=%u fence0=%p cmd_buf=%p renderpass=%zu rp=%p subpass=%u "
+                        "pipeline=%p bind_point=%d time_ms=%.3f\n",
+                        wait_label, fence_count, wait_all, (void *)fences[0], (void *)command_buffer, i,
+                        (void *)record.renderpass, record.subpass, (void *)record.pipeline, (int)record.bind_point, time_ms);
             } else {
-                fprintf(stdout, "[renderpass_timecost][%s] cmd_buf=%p renderpass=%zu time_ms=%.3f\n", wait_label,
-                        (void *)command_buffer, i, time_ms);
+                fprintf(stdout,
+                        "[renderpass_timecost][%s] cmd_buf=%p renderpass=%zu rp=%p subpass=%u pipeline=%p bind_point=%d "
+                        "time_ms=%.3f\n",
+                        wait_label, (void *)command_buffer, i, (void *)record.renderpass, record.subpass, (void *)record.pipeline,
+                        (int)record.bind_point, time_ms);
             }
         }
         fflush(stdout);
@@ -367,6 +380,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkResetCommandBuffer(VkCommandBuffer commandBuffe
             it->second.renderpasses.clear();
             it->second.warned_overflow = false;
             it->second.active_renderpass = -1;
+            it->second.current_renderpass = VK_NULL_HANDLE;
+            it->second.current_subpass = 0;
             it->second.time_stamps.clear();
         }
     }
@@ -385,6 +400,11 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass(VkCommandBuffer commandBuffer, c
     if (ReserveQueryPair(state, record)) {
         pTable->CmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, state.query_pool, record.start_query);
         state.active_renderpass = static_cast<int32_t>(state.renderpasses.size() - 1);
+        state.current_renderpass = pRenderPassBegin->renderPass;
+        state.current_subpass = 0;
+        RenderPassRecord &active = state.renderpasses.back();
+        active.renderpass = pRenderPassBegin->renderPass;
+        active.subpass = state.current_subpass;
     } else {
         if (!state.warned_overflow) {
             fprintf(stdout, "[renderpass_timecost] Query pool overflow, skip recording render pass\n");
@@ -411,6 +431,8 @@ VKAPI_ATTR void VKAPI_CALL vkCmdEndRenderPass(VkCommandBuffer commandBuffer) {
         pTable->CmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, state.query_pool, record.end_query);
     }
     state.active_renderpass = -1;
+    state.current_renderpass = VK_NULL_HANDLE;
+    state.current_subpass = 0;
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass2(VkCommandBuffer commandBuffer, const VkRenderPassBeginInfo *pRenderPassBegin,
@@ -423,6 +445,11 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass2(VkCommandBuffer commandBuffer, 
     if (ReserveQueryPair(state, record)) {
         pTable->CmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, state.query_pool, record.start_query);
         state.active_renderpass = static_cast<int32_t>(state.renderpasses.size() - 1);
+        state.current_renderpass = pRenderPassBegin->renderPass;
+        state.current_subpass = 0;
+        RenderPassRecord &active = state.renderpasses.back();
+        active.renderpass = pRenderPassBegin->renderPass;
+        active.subpass = state.current_subpass;
     } else {
         if (!state.warned_overflow) {
             fprintf(stdout, "[renderpass_timecost] Query pool overflow, skip recording render pass\n");
@@ -455,6 +482,8 @@ VKAPI_ATTR void VKAPI_CALL vkCmdEndRenderPass2(VkCommandBuffer commandBuffer, co
         pTable->CmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, state.query_pool, record.end_query);
     }
     state.active_renderpass = -1;
+    state.current_renderpass = VK_NULL_HANDLE;
+    state.current_subpass = 0;
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass2KHR(VkCommandBuffer commandBuffer, const VkRenderPassBeginInfo *pRenderPassBegin,
@@ -467,6 +496,11 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass2KHR(VkCommandBuffer commandBuffe
     if (ReserveQueryPair(state, record)) {
         pTable->CmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, state.query_pool, record.start_query);
         state.active_renderpass = static_cast<int32_t>(state.renderpasses.size() - 1);
+        state.current_renderpass = pRenderPassBegin->renderPass;
+        state.current_subpass = 0;
+        RenderPassRecord &active = state.renderpasses.back();
+        active.renderpass = pRenderPassBegin->renderPass;
+        active.subpass = state.current_subpass;
     } else {
         if (!state.warned_overflow) {
             fprintf(stdout, "[renderpass_timecost] Query pool overflow, skip recording render pass\n");
@@ -499,6 +533,74 @@ VKAPI_ATTR void VKAPI_CALL vkCmdEndRenderPass2KHR(VkCommandBuffer commandBuffer,
         pTable->CmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, state.query_pool, record.end_query);
     }
     state.active_renderpass = -1;
+    state.current_renderpass = VK_NULL_HANDLE;
+    state.current_subpass = 0;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdNextSubpass(VkCommandBuffer commandBuffer, VkSubpassContents contents) {
+    renderpass_timecost_layer_data *dev_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
+    VkuDeviceDispatchTable *pTable = dev_data->device_dispatch_table;
+    auto &state = dev_data->command_buffers[commandBuffer];
+
+    if (pTable->CmdNextSubpass) {
+        pTable->CmdNextSubpass(commandBuffer, contents);
+    }
+
+    if (state.current_renderpass != VK_NULL_HANDLE) {
+        state.current_subpass++;
+    }
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdNextSubpass2(VkCommandBuffer commandBuffer, const VkSubpassBeginInfo *pSubpassBeginInfo,
+                                             const VkSubpassEndInfo *pSubpassEndInfo) {
+    renderpass_timecost_layer_data *dev_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
+    VkuDeviceDispatchTable *pTable = dev_data->device_dispatch_table;
+    auto &state = dev_data->command_buffers[commandBuffer];
+
+    if (pTable->CmdNextSubpass2) {
+        pTable->CmdNextSubpass2(commandBuffer, pSubpassBeginInfo, pSubpassEndInfo);
+    } else if (pTable->CmdNextSubpass2KHR) {
+        pTable->CmdNextSubpass2KHR(commandBuffer, pSubpassBeginInfo, pSubpassEndInfo);
+    }
+
+    if (state.current_renderpass != VK_NULL_HANDLE) {
+        state.current_subpass++;
+    }
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdNextSubpass2KHR(VkCommandBuffer commandBuffer, const VkSubpassBeginInfo *pSubpassBeginInfo,
+                                                const VkSubpassEndInfo *pSubpassEndInfo) {
+    renderpass_timecost_layer_data *dev_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
+    VkuDeviceDispatchTable *pTable = dev_data->device_dispatch_table;
+    auto &state = dev_data->command_buffers[commandBuffer];
+
+    if (pTable->CmdNextSubpass2KHR) {
+        pTable->CmdNextSubpass2KHR(commandBuffer, pSubpassBeginInfo, pSubpassEndInfo);
+    } else if (pTable->CmdNextSubpass2) {
+        pTable->CmdNextSubpass2(commandBuffer, pSubpassBeginInfo, pSubpassEndInfo);
+    }
+
+    if (state.current_renderpass != VK_NULL_HANDLE) {
+        state.current_subpass++;
+    }
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdBindPipeline(VkCommandBuffer commandBuffer, VkPipelineBindPoint pipelineBindPoint,
+                                             VkPipeline pipeline) {
+    renderpass_timecost_layer_data *dev_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
+    VkuDeviceDispatchTable *pTable = dev_data->device_dispatch_table;
+    auto &state = dev_data->command_buffers[commandBuffer];
+
+    if (pTable->CmdBindPipeline) {
+        pTable->CmdBindPipeline(commandBuffer, pipelineBindPoint, pipeline);
+    }
+
+    if (state.active_renderpass >= 0 && state.active_renderpass < static_cast<int32_t>(state.renderpasses.size())) {
+        RenderPassRecord &record = state.renderpasses[static_cast<size_t>(state.active_renderpass)];
+        record.pipeline = pipeline;
+        record.bind_point = pipelineBindPoint;
+        record.subpass = state.current_subpass;
+    }
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkQueueWaitIdle(VkQueue queue) {
@@ -599,6 +701,10 @@ EXPORT_FUNCTION VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkD
     ADD_HOOK(vkCmdEndRenderPass2);
     ADD_HOOK(vkCmdBeginRenderPass2KHR);
     ADD_HOOK(vkCmdEndRenderPass2KHR);
+    ADD_HOOK(vkCmdNextSubpass);
+    ADD_HOOK(vkCmdNextSubpass2);
+    ADD_HOOK(vkCmdNextSubpass2KHR);
+    ADD_HOOK(vkCmdBindPipeline);
 #undef ADD_HOOK
 
     if (dev == NULL) return NULL;
